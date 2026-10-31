@@ -1,18 +1,17 @@
 package com.example.pantry.controller;
 
 import java.time.LocalDate;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicLong;
 
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -27,99 +26,130 @@ import com.example.pantry.model.PantryItem;
 @CrossOrigin(origins = "*")
 public class PantryController {
 
-    private final ConcurrentHashMap<String, PantryItem> pantryStorage = new ConcurrentHashMap<>();
-    private double totalWasteValue = 0.0;
+    private final List<PantryItem> inventory = Collections.synchronizedList(new ArrayList<>());
+    private final AtomicLong idGenerator = new AtomicLong(1);
 
-    @GetMapping
-    public List<PantryItem> getAllItems() {
-        return pantryStorage.values().stream()
-                .sorted(Comparator.comparing(PantryItem::getExpiryDate, Comparator.nullsLast(Comparator.naturalOrder())))
-                .collect(Collectors.toList());
+    // ตัวแปรเก็บค่าโภชนาการที่กินไปแล้วประจำวัน (สะสมจริง)
+    private final Map<String, Double> dailyIntake = new ConcurrentHashMap<>();
+    
+    // ตัวแปรเก็บสถิติขยะอาหารแยกตามหมวดหมู่ (สะสมจริง)
+    private final Map<String, Double> wasteStats = new ConcurrentHashMap<>();
+
+    public PantryController() {
+        resetIntakeData();
+        resetWasteData();
+
+        // ข้อมูลเริ่มต้นสำหรับทดสอบ
+        inventory.add(new PantryItem(idGenerator.getAndIncrement(), "อกไก่สด", "🥩 เนื้อสัตว์", 120.0, LocalDate.now().plusDays(2), 165, 0, 70, 31, 3.6));
+        inventory.add(new PantryItem(idGenerator.getAndIncrement(), "ผักกาดขาว", "🥦 ผักผลไม้", 35.0, LocalDate.now().plusDays(1), 12, 1, 10, 1, 0.2));
     }
 
-    // รองรับทั้ง /api/pantry และ /api/pantry/add ป้องกันข้อผิดพลาด Method Not Allowed 405
-    @PostMapping({"", "/add"})
-    public PantryItem addItem(@RequestBody PantryItem item) {
-        if (item.getId() == null || item.getId().isEmpty()) {
-            item.setId(UUID.randomUUID().toString());
-        }
-        if (item.getQuantity() <= 0) {
-            item.setQuantity(1);
-        }
-        pantryStorage.put(item.getId(), item);
-        return item;
+    private void resetIntakeData() {
+        dailyIntake.put("sugar", 0.0);
+        dailyIntake.put("sodium", 0.0);
+        dailyIntake.put("protein", 0.0);
+        dailyIntake.put("fat", 0.0);
     }
 
-    // 🍽️ กินวัตถุดิบ (ลดจำนวนลง 1)
-    @PostMapping("/{id}/eat")
-    public Map<String, Object> eatItem(@PathVariable String id) {
-        Map<String, Object> response = new HashMap<>();
-        PantryItem item = pantryStorage.get(id);
-        if (item != null) {
-            item.setQuantity(item.getQuantity() - 1);
-            if (item.getQuantity() <= 0) {
-                pantryStorage.remove(id);
-                response.put("removed", true);
-            } else {
-                response.put("removed", false);
+    private void resetWasteData() {
+        wasteStats.put("🥦 ผักผลไม้", 0.0);
+        wasteStats.put("🥩 เนื้อสัตว์", 0.0);
+        wasteStats.put("🥛 นม/เนย", 0.0);
+        wasteStats.put("🧁 ของหวาน/ขนม", 0.0);
+        wasteStats.put("🥫 ของแห้ง", 0.0);
+    }
+
+    @GetMapping("/items")
+    public List<PantryItem> getItems() {
+        synchronized (inventory) {
+            inventory.sort(Comparator.comparing(PantryItem::getExpiry, Comparator.nullsLast(Comparator.naturalOrder())));
+            return new ArrayList<>(inventory);
+        }
+    }
+
+    @PostMapping("/add")
+    public ResponseEntity<?> addItem(@RequestBody PantryItem item) {
+        if (item.getName() == null || item.getName().trim().isEmpty()) {
+            return ResponseEntity.badRequest().body("ชื่อรายการต้องไม่เป็นค่าว่าง");
+        }
+        if (item.getExpiry() == null) {
+            item.setExpiry(LocalDate.now().plusDays(7));
+        }
+        item.setId(idGenerator.getAndIncrement());
+        inventory.add(item);
+        return ResponseEntity.ok(item);
+    }
+
+    // 🍽️ เมื่อกดกิน: นำค่าโภชนาการไปบวกสะสมใน dailyIntake แล้วจึงลบออกจากคลัง
+    @PostMapping("/consume/{id}")
+    public ResponseEntity<?> consumeItem(@PathVariable Long id) {
+        synchronized (inventory) {
+            Iterator<PantryItem> iterator = inventory.iterator();
+            while (iterator.hasNext()) {
+                PantryItem item = iterator.next();
+                if (item.getId().equals(id)) {
+                    dailyIntake.put("sugar", dailyIntake.getOrDefault("sugar", 0.0) + item.getSugar());
+                    dailyIntake.put("sodium", dailyIntake.getOrDefault("sodium", 0.0) + item.getSodium());
+                    dailyIntake.put("protein", dailyIntake.getOrDefault("protein", 0.0) + item.getProtein());
+                    dailyIntake.put("fat", dailyIntake.getOrDefault("fat", 0.0) + item.getFat());
+
+                    iterator.remove();
+                    break;
+                }
             }
-            response.put("consumedItem", item);
         }
-        return response;
+        return ResponseEntity.ok().build();
     }
 
-    // ❄️ แช่แข็งวัตถุดิบ (เพิ่มวันหมดอายุ 30 วัน)
-    @PostMapping("/{id}/freeze")
-    public PantryItem freezeItem(@PathVariable String id) {
-        PantryItem item = pantryStorage.get(id);
-        if (item != null) {
-            boolean currentStatus = item.isFrozen();
-            item.setFrozen(!currentStatus);
-            if (!currentStatus && item.getExpiryDate() != null && !item.getExpiryDate().isEmpty()) {
-                try {
-                    LocalDate date = LocalDate.parse(item.getExpiryDate());
-                    item.setExpiryDate(date.plusDays(30).toString());
-                } catch (Exception ignored) {}
+    // 🗑️ เมื่อกดทิ้ง: นำราคาสินค้าไปบวกเข้ากราฟขยะอาหาร
+    @PostMapping("/discard/{id}")
+    public ResponseEntity<?> discardItem(@PathVariable Long id) {
+        synchronized (inventory) {
+            Iterator<PantryItem> iterator = inventory.iterator();
+            while (iterator.hasNext()) {
+                PantryItem item = iterator.next();
+                if (item.getId().equals(id)) {
+                    String category = item.getCategory() != null ? item.getCategory() : "🥫 ของแห้ง";
+                    wasteStats.put(category, wasteStats.getOrDefault(category, 0.0) + item.getPrice());
+                    iterator.remove();
+                    break;
+                }
             }
         }
-        return item;
+        return ResponseEntity.ok().build();
     }
 
-    // 🗑️ ทิ้งวัตถุดิบ (คำนวณมูลค่าขยะอาหาร)
-    @PostMapping("/{id}/discard")
-    public Map<String, Object> discardItem(@PathVariable String id) {
-        Map<String, Object> response = new HashMap<>();
-        PantryItem item = pantryStorage.remove(id);
-        if (item != null) {
-            double itemValue = item.getPrice() * item.getQuantity();
-            totalWasteValue += itemValue;
-            response.put("discardedValue", itemValue);
+    // ❄️ เมื่อกดฟรีซ: ขยายวันหมดอายุ 30 วัน
+    @PostMapping("/freeze/{id}")
+    public ResponseEntity<?> freezeItem(@PathVariable Long id) {
+        synchronized (inventory) {
+            for (PantryItem item : inventory) {
+                if (item.getId().equals(id)) {
+                    if (!item.getName().contains("(แช่แข็ง)")) {
+                        item.setName(item.getName() + " (แช่แข็ง)");
+                        item.setExpiry(item.getExpiry().plusDays(30));
+                    }
+                    break;
+                }
+            }
         }
-        response.put("totalWasteValue", totalWasteValue);
-        return response;
+        return ResponseEntity.ok().build();
     }
 
-    @DeleteMapping("/{id}")
-    public void deleteItem(@PathVariable String id) {
-        pantryStorage.remove(id);
+    @GetMapping("/intake")
+    public Map<String, Double> getIntake() {
+        return dailyIntake;
     }
 
-    @GetMapping("/waste")
-    public Map<String, Double> getWasteSummary() {
-        return Collections.singletonMap("totalWasteValue", totalWasteValue);
+    @GetMapping("/waste-stats")
+    public Map<String, Double> getWasteStats() {
+        return wasteStats;
     }
 
-    // 🎲 จำลองข้อมูลวัตถุดิบ
-    @PostMapping("/seed")
-    public List<PantryItem> seedMockData() {
-        LocalDate now = LocalDate.now();
-        List<PantryItem> mockList = Arrays.asList(
-            new PantryItem("8850100121011", "มันฝรั่งทอดกรอบ", "ของหวาน/ขนม", 30.0, now.plusDays(10).toString(), 150, 1.0, 350.0, 2.0, 10.0, 1),
-            new PantryItem("8850123456789", "นมสดพาสเจอร์ไรส์ 200ml", "เครื่องดื่ม", 26.0, now.plusDays(2).toString(), 120, 10.0, 80.0, 7.0, 6.0, 2)
-        );
-        for (PantryItem item : mockList) {
-            pantryStorage.put(item.getId(), item);
-        }
-        return getAllItems();
+    // 🔄 ปุ่มรีเซ็ตค่าโภชนาการประจำวัน
+    @PostMapping("/reset-intake")
+    public ResponseEntity<?> resetIntake() {
+        resetIntakeData();
+        return ResponseEntity.ok().build();
     }
 }
