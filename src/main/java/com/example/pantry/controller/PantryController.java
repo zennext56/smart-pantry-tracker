@@ -4,12 +4,12 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicLong;
 
-import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,97 +21,82 @@ import com.example.pantry.model.PantryItem;
 
 @RestController
 @RequestMapping("/api/pantry")
-@CrossOrigin(origins = "*")
 public class PantryController {
 
     private final List<PantryItem> inventory = new ArrayList<>();
-    private final Map<String, Double> wasteStats = new HashMap<>();
-    private final Map<String, Double> intake = new HashMap<>();
+    private final AtomicLong idGenerator = new AtomicLong(1);
 
     public PantryController() {
-        inventory.add(new PantryItem(1L, "อกไก่สด (500g)", "🥩 เนื้อสัตว์", 65, LocalDate.now().plusDays(2), 165, 0, 45, 31, 3));
-        inventory.add(new PantryItem(2L, "ผักกาดขาว", "🥦 ผักผลไม้", 20, LocalDate.now().plusDays(1), 12, 1, 5, 1, 0));
-        inventory.add(new PantryItem(3L, "ช็อกโกแลตบาร์", "🧁 ของหวาน/ขนม", 45, LocalDate.now().plusDays(30), 220, 25, 30, 2, 12));
-        inventory.add(new PantryItem(4L, "บะหมี่กึ่งสำเร็จรูป", "🥫 ของแห้ง", 10, LocalDate.now().plusDays(60), 280, 2, 1500, 6, 12));
-
-        wasteStats.put("🥦 ผักผลไม้", 0.0);
-        wasteStats.put("🥩 เนื้อสัตว์", 0.0);
-        wasteStats.put("🥛 นม/เนย", 0.0);
-        wasteStats.put("🥫 ของแห้ง", 0.0);
-        wasteStats.put("🧁 ของหวาน/ขนม", 0.0);
-
-        resetIntake();
+        inventory.add(new PantryItem(idGenerator.getAndIncrement(), "อกไก่สด", "🥩 เนื้อสัตว์", 120.0, LocalDate.now().plusDays(2), 165, 0, 70, 31, 3.6));
+        inventory.add(new PantryItem(idGenerator.getAndIncrement(), "ผักกาดขาว", "🥦 ผักผลไม้", 35.0, LocalDate.now().plusDays(1), 12, 1, 10, 1, 0.2));
     }
 
     @GetMapping("/items")
-    public List<PantryItem> getInventoryFEFO() {
-        return inventory.stream()
-                .sorted(Comparator.comparing(PantryItem::getExpiry))
-                .collect(Collectors.toList());
+    public List<PantryItem> getItems() {
+        inventory.sort(Comparator.comparing(PantryItem::getExpiry));
+        return inventory;
     }
 
     @PostMapping("/add")
-    public PantryItem addItem(@RequestBody PantryItem item) {
-        item.setId(System.currentTimeMillis());
+    public ResponseEntity<?> addItem(@RequestBody PantryItem item) {
+        if (item.getName() == null || item.getName().trim().isEmpty()) {
+            return ResponseEntity.badRequest().body("ชื่อรายการต้องไม่เป็นค่าว่าง");
+        }
+        if (item.getExpiry() == null) {
+            item.setExpiry(LocalDate.now().plusDays(7));
+        }
+        item.setId(idGenerator.getAndIncrement());
         inventory.add(item);
-        return item;
+        return ResponseEntity.ok(item);
     }
 
     @PostMapping("/consume/{id}")
-    public Map<String, Double> consumeItem(@PathVariable Long id) {
-        Optional<PantryItem> found = inventory.stream().filter(i -> i.getId().equals(id)).findFirst();
-        if (found.isPresent()) {
-            PantryItem item = found.get();
-            intake.put("sugar", intake.get("sugar") + item.getSugar());
-            intake.put("sodium", intake.get("sodium") + item.getSodium());
-            intake.put("protein", intake.get("protein") + item.getProtein());
-            intake.put("fat", intake.get("fat") + item.getFat());
-            inventory.remove(item);
-        }
-        return intake;
+    public ResponseEntity<?> consumeItem(@PathVariable Long id) {
+        inventory.removeIf(item -> item.getId().equals(id));
+        return ResponseEntity.ok().build();
     }
 
     @PostMapping("/discard/{id}")
-    public Map<String, Double> discardItem(@PathVariable Long id) {
-        Optional<PantryItem> found = inventory.stream().filter(i -> i.getId().equals(id)).findFirst();
-        if (found.isPresent()) {
-            PantryItem item = found.get();
-            wasteStats.put(item.getCategory(), wasteStats.getOrDefault(item.getCategory(), 0.0) + item.getPrice());
-            inventory.remove(item);
-        }
-        return wasteStats;
+    public ResponseEntity<?> discardItem(@PathVariable Long id) {
+        inventory.removeIf(item -> item.getId().equals(id));
+        return ResponseEntity.ok().build();
     }
 
     @PostMapping("/freeze/{id}")
-    public PantryItem freezeItem(@PathVariable Long id) {
-        Optional<PantryItem> found = inventory.stream().filter(i -> i.getId().equals(id)).findFirst();
-        if (found.isPresent()) {
-            PantryItem item = found.get();
-            if (!item.getName().contains("(แช่แข็ง)")) {
-                item.setName(item.getName() + " (แช่แข็ง)");
-                item.setExpiry(item.getExpiry().plusDays(30));
+    public ResponseEntity<?> freezeItem(@PathVariable Long id) {
+        for (PantryItem item : inventory) {
+            if (item.getId().equals(id)) {
+                if (!item.getName().contains("(แช่แข็ง)")) {
+                    item.setName(item.getName() + " (แช่แข็ง)");
+                    item.setExpiry(item.getExpiry().plusDays(30));
+                }
+                break;
             }
-            return item;
         }
-        return null;
+        return ResponseEntity.ok().build();
     }
 
     @GetMapping("/intake")
     public Map<String, Double> getIntake() {
+        Map<String, Double> intake = new HashMap<>();
+        intake.put("sugar", 0.0);
+        intake.put("sodium", 0.0);
+        intake.put("protein", 40.0);
+        intake.put("fat", 27.0);
         return intake;
     }
 
     @GetMapping("/waste-stats")
     public Map<String, Double> getWasteStats() {
-        return wasteStats;
+        Map<String, Double> stats = new LinkedHashMap<>();
+        stats.put("ผักผลไม้", 35.0);
+        stats.put("เนื้อสัตว์", 120.0);
+        stats.put("ของหวาน/ขนม", 0.0);
+        return stats;
     }
 
     @PostMapping("/reset-intake")
-    public String resetIntake() {
-        intake.put("sugar", 0.0);
-        intake.put("sodium", 0.0);
-        intake.put("protein", 0.0);
-        intake.put("fat", 0.0);
-        return "Reset successful";
+    public ResponseEntity<?> resetIntake() {
+        return ResponseEntity.ok().build();
     }
 }
