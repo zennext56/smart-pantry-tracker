@@ -1,0 +1,33 @@
+body { 
+    font-family: 'Prompt', sans-serif; 
+    background-color: #f4f7f6; 
+}
+
+.card { 
+    border: none; 
+    border-radius: 12px; 
+}
+
+.progress { 
+    height: 22px; 
+    border-radius: 8px; 
+    background-color: #e9ecef; 
+}
+
+.progress-bar { 
+    transition: width 0.5s ease, background-color 0.3s; 
+    font-size: 0.85rem; 
+    line-height: 22px; 
+}
+
+.table-responsive { 
+    border-radius: 12px; 
+}
+
+.nutrition-badge { 
+    font-size: 0.75rem; 
+    padding: 4px 8px; 
+    margin-right: 4px; 
+    display: inline-block; 
+    border-radius: 6px; 
+}

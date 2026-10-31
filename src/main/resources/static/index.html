@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Pantry Tracker - Ultimate Version</title>
+    <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+</head>
+<body class="p-3 p-md-4">
+    <div class="container">
+        <!-- Header & Profile Setup -->
+        <div class="row align-items-center mb-4">
+            <div class="col-md-6">
+                <h2 class="fw-bold m-0 text-primary">🥦 Smart Pantry Tracker</h2>
+            </div>
+            <div class="col-md-6 mt-3 mt-md-0 d-flex justify-content-md-end gap-2">
+                <select id="userProfile" class="form-select w-auto shadow-sm" onchange="updateProfileLimits()">
+                    <option value="normal">👤 สายคนปกติ (คุมสุขภาพทั่วไป)</option>
+                    <option value="light">🏃 สายออกกำลังกายนิดหน่อย</option>
+                    <option value="heavy">🏋️ สายเวทหนักๆ (เน้นโปรตีน)</option>
+                </select>
+                <button class="btn btn-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#addFoodModal">
+                    ➕ เพิ่มวัตถุดิบ
+                </button>
+            </div>
+        </div>
+        
+        <!-- Daily Nutrition Tracker Section -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
+                <span>📊 สรุปโภชนาการประจำวัน</span>
+                <button class="btn btn-sm btn-outline-danger" onclick="resetNutrition()">รีเซ็ตเอง</button>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3 col-6">
+                        <div class="d-flex justify-content-between mb-1 small">
+                            <span>🍬 <strong>น้ำตาล</strong></span>
+                            <span id="sugar-text">0/24g</span>
+                        </div>
+                        <div class="progress"><div id="sugar-bar" class="progress-bar bg-success" style="width: 0%;"></div></div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="d-flex justify-content-between mb-1 small">
+                            <span>🧂 <strong>โซเดียม</strong></span>
+                            <span id="sodium-text">0/2000mg</span>
+                        </div>
+                        <div class="progress"><div id="sodium-bar" class="progress-bar bg-success" style="width: 0%;"></div></div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="d-flex justify-content-between mb-1 small">
+                            <span>💪 <strong>โปรตีน</strong> (เป้าหมาย)</span>
+                            <span id="protein-text">0/50g</span>
+                        </div>
+                        <div class="progress"><div id="protein-bar" class="progress-bar bg-info" style="width: 0%;"></div></div>
+                    </div>
+                    <div class="col-md-3 col-6">
+                        <div class="d-flex justify-content-between mb-1 small">
+                            <span>🥑 <strong>ไขมัน</strong></span>
+                            <span id="fat-text">0/65g</span>
+                        </div>
+                        <div class="progress"><div id="fat-bar" class="progress-bar bg-warning" style="width: 0%;"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Smart Actions -->
+        <div class="mb-4 d-flex gap-2">
+            <button class="btn btn-warning shadow-sm fw-bold" onclick="generateRecipe()">
+                💡 คิดเมนูจากของใกล้เสีย (AI Suggestion)
+            </button>
+        </div>
+        <div id="recipe-box" class="alert alert-warning d-none shadow-sm fade show" role="alert"></div>
+
+        <!-- Table FEFO Section -->
+        <div class="card mb-4 shadow-sm border-0">
+            <div class="card-header bg-dark text-white fw-bold">
+                📋 คลังวัตถุดิบ (เรียงตามลำดับ FEFO อัตโนมัติจาก Java)
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="ps-3">สถานะ</th>
+                                <th>หมวดหมู่</th>
+                                <th>รายการ</th>
+                                <th>วันหมดอายุ</th>
+                                <th>ข้อมูลโภชนาการ</th>
+                                <th class="text-center">จัดการ</th>
+                            </tr>
+                        </thead>
+                        <tbody id="inventory-body"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Waste Chart -->
+        <div class="row">
+            <div class="col-12 mb-4">
+                <div class="card shadow-sm h-100">
+                    <div class="card-header bg-white fw-bold">📊 สัดส่วนขยะอาหาร (มูลค่า)</div>
+                    <div class="card-body">
+                        <canvas id="barChart" style="max-height: 300px; width: 100%;"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal เพิ่มวัตถุดิบ + สแกนบาร์โค้ด -->
+    <div class="modal fade" id="addFoodModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold">➕ เพิ่มวัตถุดิบใหม่</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" onclick="stopBarcodeScanner()"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- ตัวเลือกสแกน: กล้อง, เลือกไฟล์รูปภาพ, สแกนจำลอง -->
+                    <div class="d-grid gap-2 mb-3">
+                        <div class="d-flex gap-2">
+                            <button type="button" class="btn btn-primary w-50 fw-bold" onclick="startBarcodeScanner()">
+                                📷 สแกนด้วยกล้อง
+                            </button>
+                            <label for="qr-input-file" class="btn btn-success w-50 fw-bold m-0 text-center">
+                                🖼️ เลือกรูปจากโฟลเดอร์
+                            </label>
+                            <input type="file" id="qr-input-file" accept="image/*" class="d-none" onchange="scanBarcodeFromFile(event)">
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-dark w-100" onclick="mockScanBarcode()">
+                            🎲 สแกนจำลอง (Mock Data)
+                        </button>
+                    </div>
+
+                    <!-- พื้นที่แสดงหน้าจอกล้อง/รูปภาพที่สแกน -->
+                    <div id="scanner-container" class="d-none mb-3 border rounded p-2 text-center bg-dark">
+                        <div id="reader" style="width: 100%;"></div>
+                        <button type="button" class="btn btn-sm btn-danger mt-2" onclick="stopBarcodeScanner()">❌ ปิดหน้าจอสแกน</button>
+                    </div>
+
+                    <form id="addFoodForm">
+                        <div class="row">
+                            <div class="col-7 mb-3">
+                                <label class="form-label">ชื่อรายการ</label>
+                                <input type="text" class="form-control" id="f_name" required>
+                            </div>
+                            <div class="col-5 mb-3">
+                                <label class="form-label">หมวดหมู่</label>
+                                <select class="form-select" id="f_category" required>
+                                    <option value="🥦 ผักผลไม้">🥦 ผักผลไม้</option>
+                                    <option value="🥩 เนื้อสัตว์">🥩 เนื้อสัตว์</option>
+                                    <option value="🥛 นม/เนย">🥛 นม/เนย</option>
+                                    <option value="🥫 ของแห้ง">🥫 ของแห้ง</option>
+                                    <option value="🧁 ของหวาน/ขนม">🧁 ของหวาน/ขนม</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-6 mb-3">
+                                <label class="form-label">ราคา (บาท)</label>
+                                <input type="number" class="form-control" id="f_price" required min="0">
+                            </div>
+                            <div class="col-6 mb-3">
+                                <label class="form-label">วันหมดอายุ</label>
+                                <input type="date" class="form-control" id="f_expiry" required>
+                            </div>
+                        </div>
+                        <hr>
+                        <h6 class="fw-bold mb-3">ข้อมูลโภชนาการ (ต่อ 1 หน่วยบริโภค)</h6>
+                        <div class="row g-2">
+                            <div class="col-6"><label class="form-label small">แคลอรี (kcal)</label><input type="number" class="form-control form-control-sm" id="f_cal" value="0"></div>
+                            <div class="col-6"><label class="form-label small">น้ำตาล (g)</label><input type="number" class="form-control form-control-sm" id="f_sugar" value="0"></div>
+                            <div class="col-6"><label class="form-label small">โซเดียม (mg)</label><input type="number" class="form-control form-control-sm" id="f_sodium" value="0"></div>
+                            <div class="col-6"><label class="form-label small">โปรตีน (g)</label><input type="number" class="form-control form-control-sm" id="f_protein" value="0"></div>
+                            <div class="col-6"><label class="form-label small">ไขมัน (g)</label><input type="number" class="form-control form-control-sm" id="f_fat" value="0"></div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 mt-4">บันทึกข้อมูลเข้า Java Server</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
