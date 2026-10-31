@@ -29,17 +29,13 @@ public class PantryController {
     private final List<PantryItem> inventory = Collections.synchronizedList(new ArrayList<>());
     private final AtomicLong idGenerator = new AtomicLong(1);
 
-    // ตัวแปรเก็บค่าโภชนาการที่กินไปแล้วประจำวัน (สะสมจริง)
     private final Map<String, Double> dailyIntake = new ConcurrentHashMap<>();
-    
-    // ตัวแปรเก็บสถิติขยะอาหารแยกตามหมวดหมู่ (สะสมจริง)
     private final Map<String, Double> wasteStats = new ConcurrentHashMap<>();
 
     public PantryController() {
         resetIntakeData();
         resetWasteData();
 
-        // ข้อมูลเริ่มต้นสำหรับทดสอบ
         inventory.add(new PantryItem(idGenerator.getAndIncrement(), "อกไก่สด", "🥩 เนื้อสัตว์", 120.0, LocalDate.now().plusDays(2), 165, 0, 70, 31, 3.6));
         inventory.add(new PantryItem(idGenerator.getAndIncrement(), "ผักกาดขาว", "🥦 ผักผลไม้", 35.0, LocalDate.now().plusDays(1), 12, 1, 10, 1, 0.2));
     }
@@ -52,11 +48,22 @@ public class PantryController {
     }
 
     private void resetWasteData() {
+        wasteStats.clear();
         wasteStats.put("🥦 ผักผลไม้", 0.0);
         wasteStats.put("🥩 เนื้อสัตว์", 0.0);
         wasteStats.put("🥛 นม/เนย", 0.0);
         wasteStats.put("🧁 ของหวาน/ขนม", 0.0);
         wasteStats.put("🥫 ของแห้ง", 0.0);
+    }
+
+    private String normalizeCategory(String cat) {
+        if (cat == null) return "🥫 ของแห้ง";
+        if (cat.contains("ผัก")) return "🥦 ผักผลไม้";
+        if (cat.contains("เนื้อ")) return "🥩 เนื้อสัตว์";
+        if (cat.contains("หวาน") || cat.contains("ขนม")) return "🧁 ของหวาน/ขนม";
+        if (cat.contains("นม") || cat.contains("เนย")) return "🥛 นม/เนย";
+        if (cat.contains("ของแห้ง")) return "🥫 ของแห้ง";
+        return cat;
     }
 
     @GetMapping("/items")
@@ -75,12 +82,12 @@ public class PantryController {
         if (item.getExpiry() == null) {
             item.setExpiry(LocalDate.now().plusDays(7));
         }
+        item.setCategory(normalizeCategory(item.getCategory()));
         item.setId(idGenerator.getAndIncrement());
         inventory.add(item);
         return ResponseEntity.ok(item);
     }
 
-    // 🍽️ เมื่อกดกิน: นำค่าโภชนาการไปบวกสะสมใน dailyIntake แล้วจึงลบออกจากคลัง
     @PostMapping("/consume/{id}")
     public ResponseEntity<?> consumeItem(@PathVariable Long id) {
         synchronized (inventory) {
@@ -98,10 +105,9 @@ public class PantryController {
                 }
             }
         }
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(dailyIntake);
     }
 
-    // 🗑️ เมื่อกดทิ้ง: นำราคาสินค้าไปบวกเข้ากราฟขยะอาหาร
     @PostMapping("/discard/{id}")
     public ResponseEntity<?> discardItem(@PathVariable Long id) {
         synchronized (inventory) {
@@ -109,17 +115,16 @@ public class PantryController {
             while (iterator.hasNext()) {
                 PantryItem item = iterator.next();
                 if (item.getId().equals(id)) {
-                    String category = item.getCategory() != null ? item.getCategory() : "🥫 ของแห้ง";
+                    String category = normalizeCategory(item.getCategory());
                     wasteStats.put(category, wasteStats.getOrDefault(category, 0.0) + item.getPrice());
                     iterator.remove();
                     break;
                 }
             }
         }
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(wasteStats);
     }
 
-    // ❄️ เมื่อกดฟรีซ: ขยายวันหมดอายุ 30 วัน
     @PostMapping("/freeze/{id}")
     public ResponseEntity<?> freezeItem(@PathVariable Long id) {
         synchronized (inventory) {
@@ -146,10 +151,16 @@ public class PantryController {
         return wasteStats;
     }
 
-    // 🔄 ปุ่มรีเซ็ตค่าโภชนาการประจำวัน
     @PostMapping("/reset-intake")
     public ResponseEntity<?> resetIntake() {
         resetIntakeData();
-        return ResponseEntity.ok().build();
+        return ResponseEntity.ok(dailyIntake);
+    }
+
+    // 🔄 ปุ่มรีเซ็ตกราฟขยะอาหาร
+    @PostMapping("/reset-waste")
+    public ResponseEntity<?> resetWaste() {
+        resetWasteData();
+        return ResponseEntity.ok(wasteStats);
     }
 }

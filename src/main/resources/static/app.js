@@ -1,9 +1,41 @@
 const API_BASE = "/api/pantry";
 
 let limits = { sugar: 24, sodium: 2000, protein: 50, fat: 65 };
+let currentIntake = { sugar: 0, sodium: 0, protein: 0, fat: 0 }; 
+
+let currentWasteStats = {
+    "🥦 ผักผลไม้": 35.0,
+    "🥩 เนื้อสัตว์": 120.0,
+    "🥛 นม/เนย": 0.0,
+    "🧁 ของหวาน/ขนม": 0.0,
+    "🥫 ของแห้ง": 0.0
+};
+
 let wasteChart;
 let currentInventory = [];
 let html5QrcodeScanner = null;
+
+function normalizeCategory(cat) {
+    if (!cat) return "🥫 ของแห้ง";
+    if (cat.includes("ผัก")) return "🥦 ผักผลไม้";
+    if (cat.includes("เนื้อ")) return "🥩 เนื้อสัตว์";
+    if (cat.includes("หวาน") || cat.includes("ขนม")) return "🧁 ของหวาน/ขนม";
+    if (cat.includes("นม") || cat.includes("เนย")) return "🥛 นม/เนย";
+    if (cat.includes("ของแห้ง")) return "🥫 ของแห้ง";
+    return cat;
+}
+
+// 🔍 ฟังก์ชันค้นหาเมื่อผู้ใช้พิมพ์เลขบาร์โค้ดเอง
+async function lookupManualBarcode() {
+    const barcodeInput = document.getElementById('f_barcode');
+    const barcode = barcodeInput?.value.trim();
+    if (barcode) {
+        await fetchProductByBarcode(barcode);
+    } else {
+        alert("⚠️ กรุณากรอกเลขบาร์โค้ดก่อนกดค้นหา");
+    }
+}
+window.lookupManualBarcode = lookupManualBarcode;
 
 // --- API Calls ---
 async function fetchInventory() {
@@ -20,23 +52,235 @@ async function fetchInventory() {
 async function fetchIntake() {
     try {
         const res = await fetch(`${API_BASE}/intake`);
-        if (!res.ok) throw new Error("Network error");
-        const intake = await res.json();
-        updateNutritionUI(intake);
+        if (res.ok) {
+            const intake = await res.json();
+            if (intake && typeof intake === 'object') {
+                currentIntake = {
+                    sugar: intake.sugar || 0,
+                    sodium: intake.sodium || 0,
+                    protein: intake.protein || 0,
+                    fat: intake.fat || 0
+                };
+            }
+        }
     } catch (err) {
         console.error("Error fetching intake:", err);
+    } finally {
+        updateNutritionUI(currentIntake);
     }
 }
 
 async function fetchWasteStats() {
     try {
         const res = await fetch(`${API_BASE}/waste-stats`);
-        if (!res.ok) throw new Error("Network error");
-        const stats = await res.json();
-        renderChart(stats);
+        if (res.ok) {
+            const stats = await res.json();
+            if (stats && typeof stats === 'object') {
+                for (let [k, v] of Object.entries(stats)) {
+                    currentWasteStats[normalizeCategory(k)] = parseFloat(v) || 0;
+                }
+            }
+        }
     } catch (err) {
         console.error("Error fetching waste stats:", err);
+    } finally {
+        renderChart(currentWasteStats);
     }
+}
+
+// --- Action Functions ---
+
+async function consumeFood(id) {
+    const item = currentInventory.find(i => i.id === id);
+    if (item) {
+        currentIntake.sugar += parseFloat(item.sugar) || 0;
+        currentIntake.sodium += parseFloat(item.sodium) || 0;
+        currentIntake.protein += parseFloat(item.protein) || 0;
+        currentIntake.fat += parseFloat(item.fat) || 0;
+        updateNutritionUI(currentIntake);
+    }
+    
+    try {
+        const res = await fetch(`${API_BASE}/consume/${id}`, { method: 'POST' });
+        if (res.ok) {
+            const updatedIntake = await res.json();
+            if (updatedIntake && updatedIntake.protein !== undefined) {
+                currentIntake = updatedIntake;
+                updateNutritionUI(currentIntake);
+            }
+        }
+    } catch (err) {
+        console.error("Error consuming item:", err);
+    }
+    fetchInventory();
+}
+
+async function discardFood(id) {
+    const item = currentInventory.find(i => i.id === id);
+    if (item) {
+        const category = normalizeCategory(item.category);
+        const price = parseFloat(item.price) || 0;
+        currentWasteStats[category] = (currentWasteStats[category] || 0) + price;
+        renderChart(currentWasteStats);
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/discard/${id}`, { method: 'POST' });
+        if (res.ok) {
+            const updatedStats = await res.json();
+            if (updatedStats) {
+                for (let [k, v] of Object.entries(updatedStats)) {
+                    currentWasteStats[normalizeCategory(k)] = parseFloat(v) || 0;
+                }
+                renderChart(currentWasteStats);
+            }
+        }
+    } catch (err) {
+        console.error("Error discarding item:", err);
+    }
+    fetchInventory();
+}
+
+async function freezeFood(id) {
+    try {
+        await fetch(`${API_BASE}/freeze/${id}`, { method: 'POST' });
+    } catch (err) {
+        console.error("Error freezing item:", err);
+    }
+    fetchInventory();
+}
+
+async function resetNutrition() {
+    currentIntake = { sugar: 0, sodium: 0, protein: 0, fat: 0 };
+    updateNutritionUI(currentIntake);
+    try {
+        const res = await fetch(`${API_BASE}/reset-intake`, { method: 'POST' });
+        if (res.ok) {
+            const resetData = await res.json();
+            if (resetData) {
+                currentIntake = resetData;
+                updateNutritionUI(currentIntake);
+            }
+        }
+    } catch (err) {
+        console.error("Error resetting intake:", err);
+    }
+}
+
+async function resetWasteStatsUI() {
+    if (!confirm("คุณต้องการรีเซ็ตสถิติขยะอาหารทั้งหมดใช่หรือไม่?")) return;
+
+    currentWasteStats = {
+        "🥦 ผักผลไม้": 0.0,
+        "🥩 เนื้อสัตว์": 0.0,
+        "🥛 นม/เนย": 0.0,
+        "🧁 ของหวาน/ขนม": 0.0,
+        "🥫 ของแห้ง": 0.0
+    };
+    renderChart(currentWasteStats);
+
+    try {
+        const res = await fetch(`${API_BASE}/reset-waste`, { method: 'POST' });
+        if (res.ok) {
+            const resetData = await res.json();
+            if (resetData) {
+                for (let [k, v] of Object.entries(resetData)) {
+                    currentWasteStats[normalizeCategory(k)] = parseFloat(v) || 0;
+                }
+                renderChart(currentWasteStats);
+            }
+        }
+    } catch (err) {
+        console.error("Error resetting waste stats:", err);
+    }
+}
+window.resetWasteStatsUI = resetWasteStatsUI;
+
+function updateProfileLimits() {
+    const profile = document.getElementById('userProfile')?.value;
+    if (profile === 'normal') limits.protein = 50;
+    if (profile === 'light') limits.protein = 80;
+    if (profile === 'heavy') limits.protein = 140;
+    updateNutritionUI(currentIntake);
+}
+
+function updateNutritionUI(intake) {
+    const updateBar = (id, current, max, type) => {
+        const percent = Math.min((current / max) * 100, 100);
+        const bar = document.getElementById(`${id}-bar`);
+        const text = document.getElementById(`${id}-text`);
+        if (text) text.innerHTML = `<b>${(current || 0).toFixed(1)}</b>/${max}${id === 'sodium' ? 'mg' : 'g'}`;
+        if (bar) {
+            bar.style.width = `${percent}%`;
+            if (type === 'limit') {
+                bar.className = `progress-bar ${percent >= 100 ? 'bg-danger' : percent >= 80 ? 'bg-warning text-dark' : 'bg-success'}`;
+            } else {
+                if (id === 'protein') bar.className = `progress-bar ${percent >= 100 ? 'bg-success' : 'bg-info'}`;
+            }
+        }
+    };
+
+    updateBar('sugar', intake.sugar || 0, limits.sugar, 'limit');
+    updateBar('sodium', intake.sodium || 0, limits.sodium, 'limit');
+    updateBar('protein', intake.protein || 0, limits.protein, 'goal');
+    updateBar('fat', intake.fat || 0, limits.fat, 'goal');
+}
+
+function renderTable(items) {
+    const tbody = document.getElementById('inventory-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    items.forEach(item => {
+        const expDate = new Date(item.expiry);
+        expDate.setHours(0, 0, 0, 0);
+        const diffDays = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
+
+        let badge = '', rowClass = '';
+        if (diffDays < 0) { badge = '<span class="badge bg-dark">หมดอายุ</span>'; rowClass = 'table-secondary text-muted'; }
+        else if (diffDays === 0) { badge = '<span class="badge bg-danger">วันนี้!</span>'; rowClass = 'table-danger'; }
+        else if (diffDays <= 2) { badge = `<span class="badge bg-warning text-dark">เหลือ ${diffDays} วัน</span>`; rowClass = 'table-warning'; }
+        else { badge = `<span class="badge bg-success">เหลือ ${diffDays} วัน</span>`; }
+
+        const isFrozen = item.name.includes('(แช่แข็ง)');
+
+        tbody.innerHTML += `
+            <tr class="${rowClass}">
+                <td class="ps-3">${badge}</td>
+                <td>${item.category}</td>
+                <td class="fw-bold">${item.name} <br><small class="text-muted fw-normal">${item.price} ฿</small></td>
+                <td>${item.expiry}</td>
+                <td>
+                    <span class="nutrition-badge bg-light text-dark border">🔥 ${item.cal}</span>
+                    <span class="nutrition-badge bg-light text-danger border">🍬 ${item.sugar}</span>
+                    <span class="nutrition-badge bg-light text-info border">💪 ${item.protein}</span>
+                </td>
+                <td class="text-center">
+                    <div class="btn-group shadow-sm">
+                        <button class="btn btn-sm btn-success" onclick="consumeFood(${item.id})" title="กิน">🍽️</button>
+                        ${!isFrozen && item.category === '🥩 เนื้อสัตว์' ? `<button class="btn btn-sm btn-info text-white" onclick="freezeFood(${item.id})" title="แช่แข็ง">❄️</button>` : ''}
+                        <button class="btn btn-sm btn-danger" onclick="discardFood(${item.id})" title="ทิ้ง">🗑️</button>
+                    </div>
+                </td>
+            </tr>
+        `;
+    });
+}
+
+function renderChart(stats) {
+    const ctx = document.getElementById('barChart');
+    if (!ctx) return;
+    if (wasteChart) wasteChart.destroy();
+    wasteChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Object.keys(stats),
+            datasets: [{ label: 'สูญเงินไปแล้ว (บาท)', data: Object.values(stats), backgroundColor: '#ff6b6b', borderRadius: 4 }]
+        },
+        options: { responsive: true, maintainAspectRatio: false }
+    });
 }
 
 // --- Barcode Scanner Logic ---
@@ -123,6 +367,7 @@ async function onScanSuccess(decodedText) {
 }
 
 async function fetchProductByBarcode(barcode) {
+    const barcodeInput = document.getElementById('f_barcode');
     const nameInput = document.getElementById('f_name');
     const categoryInput = document.getElementById('f_category');
     const calInput = document.getElementById('f_cal');
@@ -132,6 +377,8 @@ async function fetchProductByBarcode(barcode) {
     const fatInput = document.getElementById('f_fat');
     const expiryInput = document.getElementById('f_expiry');
 
+    if (barcodeInput) barcodeInput.value = barcode;
+
     try {
         const res = await fetch(`https://world.openfoodfacts.org/api/v0/product/${barcode}.json`);
         const data = await res.json();
@@ -140,15 +387,17 @@ async function fetchProductByBarcode(barcode) {
             const p = data.product;
             const nutriments = p.nutriments || {};
 
-            // 1. ดึงชื่อสินค้า
-            if (nameInput) nameInput.value = p.product_name_th || p.product_name || `สินค้า (${barcode})`;
+            const productName = p.product_name_th || p.product_name || `สินค้า (${barcode})`;
+            if (nameInput) nameInput.value = productName;
 
-            // 2. วิเคราะห์หมวดหมู่สินค้าอัตโนมัติ เพื่อประเมินวันหมดอายุที่เหมาะสม
             let category = "🥫 ของแห้ง";
-            let daysToAdd = 30; // ของแห้งデフォルト 30 วัน
+            let daysToAdd = 30;
 
             const categoriesStr = (p.categories || "").toLowerCase();
-            if (categoriesStr.includes("beverage") || categoriesStr.includes("milk") || categoriesStr.includes("dairy") || categoriesStr.includes("นม")) {
+            if (categoriesStr.includes("snack") || categoriesStr.includes("sweet") || categoriesStr.includes("dessert") || categoriesStr.includes("ขนม") || categoriesStr.includes("หวาน")) {
+                category = "🧁 ของหวาน/ขนม";
+                daysToAdd = 60;
+            } else if (categoriesStr.includes("beverage") || categoriesStr.includes("milk") || categoriesStr.includes("dairy") || categoriesStr.includes("นม") || categoriesStr.includes("เนย")) {
                 category = "🥛 นม/เนย";
                 daysToAdd = 7;
             } else if (categoriesStr.includes("meat") || categoriesStr.includes("chicken") || categoriesStr.includes("pork") || categoriesStr.includes("seafood") || categoriesStr.includes("เนื้อ")) {
@@ -157,19 +406,14 @@ async function fetchProductByBarcode(barcode) {
             } else if (categoriesStr.includes("fruit") || categoriesStr.includes("vegetable") || categoriesStr.includes("ผัก")) {
                 category = "🥦 ผักผลไม้";
                 daysToAdd = 5;
-            } else if (categoriesStr.includes("snack") || categoriesStr.includes("sweet") || categoriesStr.includes("dessert") || categoriesStr.includes("ขนม")) {
-                category = "🧁 ของหวาน/ขนม";
-                daysToAdd = 60;
             }
 
             if (categoryInput) categoryInput.value = category;
 
-            // 3. คำนวณวันหมดอายุตามประเภทสินค้า
             const d = new Date(); 
             d.setDate(d.getDate() + daysToAdd);
             if (expiryInput) expiryInput.value = d.toISOString().split('T')[0];
 
-            // 4. ดึงค่าโภชนาการแบบค้นหาทุกช่องข้อมูล (Serving & 100g Fallback)
             const getNutriment = (keys) => {
                 for (let key of keys) {
                     if (nutriments[key] !== undefined && nutriments[key] !== null) {
@@ -184,132 +428,25 @@ async function fetchProductByBarcode(barcode) {
             if (proteinInput) proteinInput.value = getNutriment(['proteins_serving', 'proteins_100g', 'proteins', 'proteins_value']);
             if (fatInput) fatInput.value = getNutriment(['fat_serving', 'fat_100g', 'fat', 'fat_value']);
             
-            // แปลงโซเดียม (กรัม ➔ มิลลิกรัม)
             let sodiumVal = nutriments['sodium_serving'] ?? nutriments['sodium_100g'] ?? nutriments['sodium'] ?? 0;
-            if (sodiumVal > 0 && sodiumVal < 10) sodiumVal = sodiumVal * 1000; // หากมาเป็นกรัม ให้คูณ 1000 แปลงเป็น mg
+            if (sodiumVal > 0 && sodiumVal < 10) sodiumVal = sodiumVal * 1000;
             if (sodiumInput) sodiumInput.value = Math.round(sodiumVal);
 
+            alert(`✅ ค้นหาสำเร็จ! พบสินค้า: ${productName}`);
+
         } else {
-            // สินค้าที่ไม่มีในระบบ Open Food Facts
             if (nameInput) nameInput.value = `สินค้าบาร์โค้ด (${barcode})`;
             const d = new Date(); d.setDate(d.getDate() + 7);
             if (expiryInput) expiryInput.value = d.toISOString().split('T')[0];
+            alert(`ℹ️ ไม่พบสินค้าในฐานข้อมูลระบบกลาง ตั้งชื่อเริ่มต้นเป็น "สินค้าบาร์โค้ด (${barcode})" เรียบร้อยครับ`);
         }
     } catch (err) {
         console.error("Barcode lookup error:", err);
         if (nameInput) nameInput.value = `สินค้าบาร์โค้ด (${barcode})`;
         const d = new Date(); d.setDate(d.getDate() + 7);
         if (expiryInput) expiryInput.value = d.toISOString().split('T')[0];
+        alert(`ℹ️ เชื่อมต่อระบบออนไลน์ไม่สำเร็จ ตั้งชื่อเริ่มต้นเป็น "สินค้าบาร์โค้ด (${barcode})" เรียบร้อยครับ`);
     }
-}
-
-// --- UI Logic ---
-function updateProfileLimits() {
-    const profile = document.getElementById('userProfile')?.value;
-    if (profile === 'normal') limits.protein = 50;
-    if (profile === 'light') limits.protein = 80;
-    if (profile === 'heavy') limits.protein = 140;
-    fetchIntake();
-}
-
-function updateNutritionUI(intake) {
-    const updateBar = (id, current, max, type) => {
-        const percent = Math.min((current / max) * 100, 100);
-        const bar = document.getElementById(`${id}-bar`);
-        const text = document.getElementById(`${id}-text`);
-        if (text) text.innerHTML = `<b>${current.toFixed(1)}</b>/${max}${id === 'sodium' ? 'mg' : 'g'}`;
-        if (bar) {
-            bar.style.width = `${percent}%`;
-            if (type === 'limit') {
-                bar.className = `progress-bar ${percent >= 100 ? 'bg-danger' : percent >= 80 ? 'bg-warning text-dark' : 'bg-success'}`;
-            } else {
-                if (id === 'protein') bar.className = `progress-bar ${percent >= 100 ? 'bg-success' : 'bg-info'}`;
-            }
-        }
-    };
-
-    updateBar('sugar', intake.sugar || 0, limits.sugar, 'limit');
-    updateBar('sodium', intake.sodium || 0, limits.sodium, 'limit');
-    updateBar('protein', intake.protein || 0, limits.protein, 'goal');
-    updateBar('fat', intake.fat || 0, limits.fat, 'goal');
-}
-
-function renderTable(items) {
-    const tbody = document.getElementById('inventory-body');
-    if (!tbody) return;
-    tbody.innerHTML = '';
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    items.forEach(item => {
-        const expDate = new Date(item.expiry);
-        expDate.setHours(0, 0, 0, 0);
-        const diffDays = Math.ceil((expDate - today) / (1000 * 60 * 60 * 24));
-
-        let badge = '', rowClass = '';
-        if (diffDays < 0) { badge = '<span class="badge bg-dark">หมดอายุ</span>'; rowClass = 'table-secondary text-muted'; }
-        else if (diffDays === 0) { badge = '<span class="badge bg-danger">วันนี้!</span>'; rowClass = 'table-danger'; }
-        else if (diffDays <= 2) { badge = `<span class="badge bg-warning text-dark">เหลือ ${diffDays} วัน</span>`; rowClass = 'table-warning'; }
-        else { badge = `<span class="badge bg-success">เหลือ ${diffDays} วัน</span>`; }
-
-        const isFrozen = item.name.includes('(แช่แข็ง)');
-
-        tbody.innerHTML += `
-            <tr class="${rowClass}">
-                <td class="ps-3">${badge}</td>
-                <td>${item.category}</td>
-                <td class="fw-bold">${item.name} <br><small class="text-muted fw-normal">${item.price} ฿</small></td>
-                <td>${item.expiry}</td>
-                <td>
-                    <span class="nutrition-badge bg-light text-dark border">🔥 ${item.cal}</span>
-                    <span class="nutrition-badge bg-light text-danger border">🍬 ${item.sugar}</span>
-                    <span class="nutrition-badge bg-light text-info border">💪 ${item.protein}</span>
-                </td>
-                <td class="text-center">
-                    <div class="btn-group shadow-sm">
-                        <button class="btn btn-sm btn-success" onclick="consumeFood(${item.id})" title="กิน">🍽️</button>
-                        ${!isFrozen && item.category === '🥩 เนื้อสัตว์' ? `<button class="btn btn-sm btn-info text-white" onclick="freezeFood(${item.id})" title="แช่แข็ง">❄️</button>` : ''}
-                        <button class="btn btn-sm btn-danger" onclick="discardFood(${item.id})" title="ทิ้ง">🗑️</button>
-                    </div>
-                </td>
-            </tr>
-        `;
-    });
-}
-
-function renderChart(stats) {
-    const ctx = document.getElementById('barChart');
-    if (!ctx) return;
-    if (wasteChart) wasteChart.destroy();
-    wasteChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: Object.keys(stats),
-            datasets: [{ label: 'สูญเงินไปแล้ว (บาท)', data: Object.values(stats), backgroundColor: '#ff6b6b', borderRadius: 4 }]
-        },
-        options: { responsive: true, maintainAspectRatio: false }
-    });
-}
-
-// --- Action Functions ---
-async function consumeFood(id) {
-    await fetch(`${API_BASE}/consume/${id}`, { method: 'POST' });
-    refreshAll();
-}
-
-async function discardFood(id) {
-    await fetch(`${API_BASE}/discard/${id}`, { method: 'POST' });
-    refreshAll();
-}
-
-async function freezeFood(id) {
-    await fetch(`${API_BASE}/freeze/${id}`, { method: 'POST' });
-    refreshAll();
-}
-
-async function resetNutrition() {
-    await fetch(`${API_BASE}/reset-intake`, { method: 'POST' });
-    refreshAll();
 }
 
 function generateRecipe() {
@@ -334,10 +471,11 @@ function mockScanBarcode() {
         return d.toISOString().split('T')[0];
     };
     const mocks = [
-        {n: 'นมเวย์โปรตีน', c: '🥛 นม/เนย', p: 49, cal: 170, su: 0, so: 100, pr: 28, f: 2},
-        {n: 'มันฝรั่งทอดกรอบ', c: '🧁 ของหวาน/ขนม', p: 30, cal: 150, su: 1, so: 350, pr: 2, f: 10}
+        {b: '8850100121011', n: 'ไวไว รสต้มโคล้ง', c: '🥫 ของแห้ง', p: 7, cal: 300, su: 2, so: 1200, pr: 6, f: 11},
+        {b: '8850999001234', n: 'มันฝรั่งทอดกรอบ', c: '🧁 ของหวาน/ขนม', p: 30, cal: 150, su: 1, so: 350, pr: 2, f: 10}
     ];
     const r = mocks[Math.floor(Math.random() * mocks.length)];
+    document.getElementById('f_barcode').value = r.b;
     document.getElementById('f_name').value = r.n;
     document.getElementById('f_category').value = r.c;
     document.getElementById('f_price').value = r.p;
@@ -347,12 +485,6 @@ function mockScanBarcode() {
     document.getElementById('f_sodium').value = r.so; 
     document.getElementById('f_protein').value = r.pr;
     document.getElementById('f_fat').value = r.f;
-}
-
-function refreshAll() {
-    fetchInventory();
-    fetchIntake();
-    fetchWasteStats();
 }
 
 // --- Event Listeners & Submit Handler ---
@@ -410,7 +542,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     modal.hide();
                 }
                 
-                refreshAll();
+                fetchInventory();
             } catch (err) {
                 console.error("Error adding food:", err);
                 alert("❌ เกิดข้อผิดพลาดในการเชื่อมต่อเซิร์ฟเวอร์: " + err.message);
@@ -418,5 +550,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    refreshAll();
+    fetchInventory();
+    fetchIntake();
+    fetchWasteStats();
 });
