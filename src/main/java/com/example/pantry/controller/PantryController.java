@@ -50,7 +50,7 @@ public class PantryController {
         return item;
     }
 
-    // 🍽️ ปุ่มกดกิน (Eat Item): ลดจำนวนลง 1 ถ้าเหลือ 0 ลบออกจากคลัง
+    // 🍽️ กินวัตถุดิบ (ลดจำนวนลง 1)
     @PostMapping("/{id}/eat")
     public Map<String, Object> eatItem(@PathVariable String id) {
         Map<String, Object> response = new HashMap<>();
@@ -62,14 +62,13 @@ public class PantryController {
                 response.put("removed", true);
             } else {
                 response.put("removed", false);
-                response.put("remainingQuantity", item.getQuantity());
             }
             response.put("consumedItem", item);
         }
         return response;
     }
 
-    // ❄️ ปุ่มกดฟรีซ (Freeze Item): สลับสถานะฟรีซ และขยายวันหมดอายุเพิ่ม 30 วัน
+    // ❄️ แช่แข็งวัตถุดิบ (เพิ่มวันหมดอายุ 30 วัน)
     @PostMapping("/{id}/freeze")
     public PantryItem freezeItem(@PathVariable String id) {
         PantryItem item = pantryStorage.get(id);
@@ -86,7 +85,7 @@ public class PantryController {
         return item;
     }
 
-    // 🗑️ ปุ่มกดทิ้ง (Discard Item): ลบออกจากคลัง และนำมูลค่าไปสะสมเป็นขยะอาหาร
+    // 🗑️ ทิ้งวัตถุดิบ (คำนวณมูลค่าขยะอาหาร)
     @PostMapping("/{id}/discard")
     public Map<String, Object> discardItem(@PathVariable String id) {
         Map<String, Object> response = new HashMap<>();
@@ -110,14 +109,13 @@ public class PantryController {
         return Collections.singletonMap("totalWasteValue", totalWasteValue);
     }
 
-    // 🎲 ปุ่มจำลองวัตถุดิบ (Seed Mock Data)
+    // 🎲 จำลองข้อมูลวัตถุดิบ
     @PostMapping("/seed")
     public List<PantryItem> seedMockData() {
         LocalDate now = LocalDate.now();
         List<PantryItem> mockList = Arrays.asList(
-            new PantryItem("8850100121011", "นมสดพาสเจอร์ไรส์ 200ml", "เครื่องดื่ม", 26.0, now.plusDays(2).toString(), 120, 10.0, 80.0, 7.0, 6.0, 2),
-            new PantryItem("8850123456789", "อกไก่นุ่มพร้อมทาน 150g", "วัตถุดิบปรุงอาหาร", 40.0, now.plusDays(5).toString(), 160, 0.0, 220.0, 32.0, 2.5, 3),
-            new PantryItem("8850987654321", "มันฝรั่งทอดกรอบ 40g", "ของหวาน/ขนม", 30.0, now.plusDays(45).toString(), 220, 2.0, 180.0, 3.0, 12.0, 1)
+            new PantryItem("8850100121011", "มันฝรั่งทอดกรอบ", "ของหวาน/ขนม", 30.0, now.plusDays(10).toString(), 150, 1.0, 350.0, 2.0, 10.0, 1),
+            new PantryItem("8850123456789", "นมสดพาสเจอร์ไรส์ 200ml", "เครื่องดื่ม", 26.0, now.plusDays(2).toString(), 120, 10.0, 80.0, 7.0, 6.0, 2)
         );
         for (PantryItem item : mockList) {
             pantryStorage.put(item.getId(), item);
