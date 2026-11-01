@@ -44,7 +44,7 @@
             </div>
         </div>
 
-        <!-- สรุปโภชนาการประจำวัน -->
+        <!-- สรุปโภชนาการประจำวัน (เพิ่มช่องแคลอรี) -->
         <div class="card shadow-sm mb-4">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -52,8 +52,17 @@
                     <button class="btn btn-sm btn-outline-danger" onclick="resetNutrition()">รีเซ็ตเอง</button>
                 </div>
                 
-                <div class="row g-3">
-                    <div class="col-md-3 col-6">
+                <div class="row g-3 row-cols-2 row-cols-md-5">
+                    <div class="col">
+                        <div class="d-flex justify-content-between mb-1">
+                            <span>🔥 แคลอรี</span>
+                            <span id="cal-text"><b>0.0</b>/2000kcal</span>
+                        </div>
+                        <div class="progress" style="height: 10px;">
+                            <div id="cal-bar" class="progress-bar bg-danger" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="col">
                         <div class="d-flex justify-content-between mb-1">
                             <span>🍬 น้ำตาล</span>
                             <span id="sugar-text"><b>0.0</b>/24g</span>
@@ -62,7 +71,7 @@
                             <div id="sugar-bar" class="progress-bar bg-success" style="width: 0%"></div>
                         </div>
                     </div>
-                    <div class="col-md-3 col-6">
+                    <div class="col">
                         <div class="d-flex justify-content-between mb-1">
                             <span>🧂 โซเดียม</span>
                             <span id="sodium-text"><b>0.0</b>/2000mg</span>
@@ -71,16 +80,16 @@
                             <div id="sodium-bar" class="progress-bar bg-success" style="width: 0%"></div>
                         </div>
                     </div>
-                    <div class="col-md-3 col-6">
+                    <div class="col">
                         <div class="d-flex justify-content-between mb-1">
-                            <span>💪 โปรตีน (เป้าหมาย)</span>
+                            <span>💪 โปรตีน</span>
                             <span id="protein-text"><b>0.0</b>/50g</span>
                         </div>
                         <div class="progress" style="height: 10px;">
                             <div id="protein-bar" class="progress-bar bg-info" style="width: 0%"></div>
                         </div>
                     </div>
-                    <div class="col-md-3 col-6">
+                    <div class="col">
                         <div class="d-flex justify-content-between mb-1">
                             <span>🥑 ไขมัน</span>
                             <span id="fat-text"><b>0.0</b>/65g</span>

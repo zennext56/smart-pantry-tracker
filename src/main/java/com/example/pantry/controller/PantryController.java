@@ -41,12 +41,14 @@ public class PantryController {
     }
 
     private void resetIntakeData() {
+        dailyIntake.put("cal", 0.0);
         dailyIntake.put("sugar", 0.0);
         dailyIntake.put("sodium", 0.0);
         dailyIntake.put("protein", 0.0);
         dailyIntake.put("fat", 0.0);
     }
 
+    // 🔄 กำหนดให้รีเซ็ตขยะอาหารทุกหมวดหมู่กลับเป็น 0.0 ทั้งหมด
     private void resetWasteData() {
         wasteStats.clear();
         wasteStats.put("🥦 ผักผลไม้", 0.0);
@@ -95,6 +97,7 @@ public class PantryController {
             while (iterator.hasNext()) {
                 PantryItem item = iterator.next();
                 if (item.getId().equals(id)) {
+                    dailyIntake.put("cal", dailyIntake.getOrDefault("cal", 0.0) + item.getCal());
                     dailyIntake.put("sugar", dailyIntake.getOrDefault("sugar", 0.0) + item.getSugar());
                     dailyIntake.put("sodium", dailyIntake.getOrDefault("sodium", 0.0) + item.getSodium());
                     dailyIntake.put("protein", dailyIntake.getOrDefault("protein", 0.0) + item.getProtein());
@@ -157,7 +160,6 @@ public class PantryController {
         return ResponseEntity.ok(dailyIntake);
     }
 
-    // 🔄 ปุ่มรีเซ็ตกราฟขยะอาหาร
     @PostMapping("/reset-waste")
     public ResponseEntity<?> resetWaste() {
         resetWasteData();

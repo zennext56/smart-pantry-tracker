@@ -1,7 +1,7 @@
 const API_BASE = "/api/pantry";
 
-let limits = { sugar: 24, sodium: 2000, protein: 50, fat: 65 };
-let currentIntake = { sugar: 0, sodium: 0, protein: 0, fat: 0 }; 
+let limits = { cal: 2000, sugar: 24, sodium: 2000, protein: 50, fat: 65 };
+let currentIntake = { cal: 0, sugar: 0, sodium: 0, protein: 0, fat: 0 }; 
 
 let currentWasteStats = {
     "🥦 ผักผลไม้": 35.0,
@@ -56,6 +56,7 @@ async function fetchIntake() {
             const intake = await res.json();
             if (intake && typeof intake === 'object') {
                 currentIntake = {
+                    cal: intake.cal || 0,
                     sugar: intake.sugar || 0,
                     sodium: intake.sodium || 0,
                     protein: intake.protein || 0,
@@ -93,6 +94,7 @@ async function fetchWasteStats() {
 async function consumeFood(id) {
     const item = currentInventory.find(i => i.id === id);
     if (item) {
+        currentIntake.cal += parseFloat(item.cal) || 0;
         currentIntake.sugar += parseFloat(item.sugar) || 0;
         currentIntake.sodium += parseFloat(item.sodium) || 0;
         currentIntake.protein += parseFloat(item.protein) || 0;
@@ -151,7 +153,7 @@ async function freezeFood(id) {
 }
 
 async function resetNutrition() {
-    currentIntake = { sugar: 0, sodium: 0, protein: 0, fat: 0 };
+    currentIntake = { cal: 0, sugar: 0, sodium: 0, protein: 0, fat: 0 };
     updateNutritionUI(currentIntake);
     try {
         const res = await fetch(`${API_BASE}/reset-intake`, { method: 'POST' });
@@ -198,9 +200,9 @@ window.resetWasteStatsUI = resetWasteStatsUI;
 
 function updateProfileLimits() {
     const profile = document.getElementById('userProfile')?.value;
-    if (profile === 'normal') limits.protein = 50;
-    if (profile === 'light') limits.protein = 80;
-    if (profile === 'heavy') limits.protein = 140;
+    if (profile === 'normal') { limits.cal = 2000; limits.protein = 50; }
+    if (profile === 'light') { limits.cal = 2200; limits.protein = 80; }
+    if (profile === 'heavy') { limits.cal = 2800; limits.protein = 140; }
     updateNutritionUI(currentIntake);
 }
 
@@ -209,17 +211,21 @@ function updateNutritionUI(intake) {
         const percent = Math.min((current / max) * 100, 100);
         const bar = document.getElementById(`${id}-bar`);
         const text = document.getElementById(`${id}-text`);
-        if (text) text.innerHTML = `<b>${(current || 0).toFixed(1)}</b>/${max}${id === 'sodium' ? 'mg' : 'g'}`;
+        const unit = id === 'sodium' ? 'mg' : id === 'cal' ? 'kcal' : 'g';
+        
+        if (text) text.innerHTML = `<b>${(current || 0).toFixed(1)}</b>/${max}${unit}`;
         if (bar) {
             bar.style.width = `${percent}%`;
             if (type === 'limit') {
                 bar.className = `progress-bar ${percent >= 100 ? 'bg-danger' : percent >= 80 ? 'bg-warning text-dark' : 'bg-success'}`;
             } else {
                 if (id === 'protein') bar.className = `progress-bar ${percent >= 100 ? 'bg-success' : 'bg-info'}`;
+                if (id === 'cal') bar.className = `progress-bar ${percent >= 100 ? 'bg-danger' : 'bg-danger'}`;
             }
         }
     };
 
+    updateBar('cal', intake.cal || 0, limits.cal, 'goal');
     updateBar('sugar', intake.sugar || 0, limits.sugar, 'limit');
     updateBar('sodium', intake.sodium || 0, limits.sodium, 'limit');
     updateBar('protein', intake.protein || 0, limits.protein, 'goal');
